@@ -1,0 +1,1245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cadence - Premium Piano Chord Recall Trainer</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React and ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  <!-- Babel for JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+    }
+    .mono-font {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    /* Custom slow spin for harmonic loader aesthetics */
+    @keyframes spin-slow {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+    .animate-spin-slow {
+      animation: spin-slow 8s linear infinite;
+    }
+    /* Dynamic Audio Wave EQ Bars */
+    @keyframes eq-bounce {
+      0%, 100% { height: 8px; }
+      50% { height: 44px; }
+    }
+    .animate-eq-1 { animation: eq-bounce 0.8s ease-in-out infinite; }
+    .animate-eq-2 { animation: eq-bounce 1.1s ease-in-out infinite 0.15s; }
+    .animate-eq-3 { animation: eq-bounce 0.9s ease-in-out infinite 0.3s; }
+    .animate-eq-4 { animation: eq-bounce 1.3s ease-in-out infinite 0.05s; }
+    .animate-eq-5 { animation: eq-bounce 1.0s ease-in-out infinite 0.2s; }
+
+    /* Elegant custom scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen selection:bg-indigo-500/30 selection:text-indigo-200 overflow-x-hidden">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const ROOTS = [
+      { name: 'C', offset: 0, preferredAccidental: 'sharp' },
+      { name: 'C# / Db', offset: 1, preferredAccidental: 'flat' },
+      { name: 'D', offset: 2, preferredAccidental: 'sharp' },
+      { name: 'D# / Eb', offset: 3, preferredAccidental: 'flat' },
+      { name: 'E', offset: 4, preferredAccidental: 'sharp' },
+      { name: 'F', offset: 5, preferredAccidental: 'flat' },
+      { name: 'F# / Gb', offset: 6, preferredAccidental: 'sharp' },
+      { name: 'G', offset: 7, preferredAccidental: 'sharp' },
+      { name: 'G# / Ab', offset: 8, preferredAccidental: 'flat' },
+      { name: 'A', offset: 9, preferredAccidental: 'sharp' },
+      { name: 'A# / Bb', offset: 10, preferredAccidental: 'flat' },
+      { name: 'B', offset: 11, preferredAccidental: 'sharp' }
+    ];
+
+    const LEVELS = {
+      intervals: {
+        label: 'Intervals',
+        description: 'Two-note melodic & harmonic distances',
+        qualities: [
+          { id: 'm2', name: 'Minor 2nd', semitones: [0, 1] },
+          { id: 'M2', name: 'Major 2nd', semitones: [0, 2] },
+          { id: 'm3', name: 'Minor 3rd', semitones: [0, 3] },
+          { id: 'M3', name: 'Major 3rd', semitones: [0, 4] },
+          { id: 'P4', name: 'Perfect 4th', semitones: [0, 5] },
+          { id: 'dim5', name: 'Tritone', semitones: [0, 6] },
+          { id: 'P5', name: 'Perfect 5th', semitones: [0, 7] },
+          { id: 'm6', name: 'Minor 6th', semitones: [0, 8] },
+          { id: 'M6', name: 'Major 6th', semitones: [0, 9] },
+          { id: 'm7', name: 'Minor 7th', semitones: [0, 10] },
+          { id: 'M7', name: 'Major 7th', semitones: [0, 11] },
+          { id: 'Oct', name: 'Octave', semitones: [0, 12] }
+        ]
+      },
+      triads: {
+        label: 'Triads',
+        description: 'Classic three-note foundational chords',
+        qualities: [
+          { id: 'maj', name: 'Major Triad', semitones: [0, 4, 7], suffix: 'maj' },
+          { id: 'min', name: 'Minor Triad', semitones: [0, 3, 7], suffix: 'min' },
+          { id: 'dim', name: 'Diminished Triad', semitones: [0, 3, 6], suffix: 'dim' },
+          { id: 'aug', name: 'Augmented Triad', semitones: [0, 4, 8], suffix: 'aug' },
+          { id: 'sus4', name: 'Suspended 4th', semitones: [0, 5, 7], suffix: 'sus4' },
+          { id: 'sus2', name: 'Suspended 2nd', semitones: [0, 2, 7], suffix: 'sus2' }
+        ]
+      },
+      extended: {
+        label: 'Extended (7s & 9s)',
+        description: 'Lush four and five-note jazz harmonies',
+        qualities: [
+          { id: 'maj7', name: 'Major 7th', semitones: [0, 4, 7, 11], suffix: 'maj7' },
+          { id: 'm7', name: 'Minor 7th', semitones: [0, 3, 7, 10], suffix: 'm7' },
+          { id: 'dom7', name: 'Dominant 7th', semitones: [0, 4, 7, 10], suffix: '7' },
+          { id: 'm7b5', name: 'Half-Diminished 7th', semitones: [0, 3, 6, 10], suffix: 'ø7' },
+          { id: 'dim7', name: 'Diminished 7th', semitones: [0, 3, 6, 9], suffix: 'dim7' },
+          { id: 'mmaj7', name: 'Minor-Major 7th', semitones: [0, 3, 7, 11], suffix: 'm(maj7)' },
+          { id: 'maj9', name: 'Major 9th', semitones: [0, 4, 7, 11, 14], suffix: 'maj9' },
+          { id: 'm9', name: 'Minor 9th', semitones: [0, 3, 7, 10, 14], suffix: 'm9' },
+          { id: 'dom9', name: 'Dominant 9th', semitones: [0, 4, 7, 10, 14], suffix: '9' }
+        ]
+      },
+      complex: {
+        label: 'Extended Complex',
+        description: 'Altered dominants and higher extensions',
+        qualities: [
+          { id: '7b5', name: 'Dominant 7th flat 5', semitones: [0, 4, 6, 10], suffix: '7(b5)' },
+          { id: '7#5', name: 'Dominant 7th sharp 5', semitones: [0, 4, 8, 10], suffix: '7(#5)' },
+          { id: '7b9', name: 'Dominant 7th flat 9', semitones: [0, 4, 7, 10, 13], suffix: '7(b9)' },
+          { id: '7#9', name: 'Dominant 7th sharp 9', semitones: [0, 4, 7, 10, 15], suffix: '7(#9)' },
+          { id: '9#11', name: 'Dominant 9th sharp 11', semitones: [0, 4, 7, 10, 14, 18], suffix: '9(#11)' },
+          { id: '11th', name: 'Eleventh Chord', semitones: [0, 4, 7, 10, 14, 17], suffix: '11' },
+          { id: '13th', name: 'Thirteenth (Voiced)', semitones: [0, 4, 10, 14, 21], suffix: '13' },
+          { id: '7alt', name: 'Altered Chord', semitones: [0, 4, 8, 10, 13, 15], suffix: '7alt' }
+        ]
+      }
+    };
+
+    const NOTE_NAMES_SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const NOTE_NAMES_FLATS  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+
+    const KEYBOARD_MIN_MIDI = 48;
+    const KEYBOARD_MAX_MIDI = 84;
+
+    function getSpelledNote(midiVal, preferAccidental) {
+      const scaleDegree = midiVal % 12;
+      const octave = Math.floor(midiVal / 12) - 1;
+      const name = preferAccidental === 'flat' ? NOTE_NAMES_FLATS[scaleDegree] : NOTE_NAMES_SHARPS[scaleDegree];
+      return `${name}${octave}`;
+    }
+
+    // Audio Engine - Warm analog electric piano modeling lowpass sweep filter
+    let audioCtx = null;
+    function playKeyboardChord(midiNotes) {
+      try {
+        if (!audioCtx) {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+        const now = audioCtx.currentTime;
+
+        // Create warm master lowpass filter to prevent harsh digital noise
+        const lowpassFilter = audioCtx.createBiquadFilter();
+        lowpassFilter.type = 'lowpass';
+        // Dynamic envelope sweeps high to low
+        lowpassFilter.frequency.setValueAtTime(1400, now);
+        lowpassFilter.frequency.exponentialRampToValueAtTime(350, now + 1.2);
+
+        lowpassFilter.connect(audioCtx.destination);
+
+        midiNotes.forEach((midi, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gainNode = audioCtx.createGain();
+          
+          const freq = 440 * Math.pow(2, (midi - 69) / 12);
+          osc.frequency.value = freq;
+          osc.type = 'triangle'; // Warm fundamental triangle wave
+
+          // Micro roll stagger for beautiful strum arpeggiation
+          const stagger = idx * 0.05;
+          
+          gainNode.gain.setValueAtTime(0, now);
+          gainNode.gain.linearRampToValueAtTime(0.14, now + stagger + 0.03);
+          gainNode.gain.exponentialRampToValueAtTime(0.001, now + stagger + 1.6);
+          
+          osc.connect(gainNode);
+          gainNode.connect(lowpassFilter);
+          
+          osc.start(now + stagger);
+          osc.stop(now + stagger + 1.8);
+        });
+      } catch (e) {
+        console.error("Audio Context playback error:", e);
+      }
+    }
+
+    function App() {
+      // Configuration
+      const [level, setLevel] = useState('triads');
+      const [trainingFocus, setTrainingFocus] = useState('visual'); // 'visual' (Recall) | 'ear' (Ear Training)
+      const [selectedRoots, setSelectedRoots] = useState(ROOTS.map(r => r.offset));
+      const [selectedQualities, setSelectedQualities] = useState({
+        intervals: LEVELS.intervals.qualities.map(q => q.id),
+        triads: LEVELS.triads.qualities.slice(0, 3).map(q => q.id),
+        extended: LEVELS.extended.qualities.slice(0, 3).map(q => q.id),
+        complex: LEVELS.complex.qualities.slice(0, 3).map(q => q.id)
+      });
+      const [selectedInversions, setSelectedInversions] = useState([0, 1, 2, 3]);
+
+      // Settings
+      const [isAutoMode, setIsAutoMode] = useState(false);
+      const [autoSeconds, setAutoSeconds] = useState(5);
+      const [showLabels, setShowLabels] = useState(true);
+      const [soundEnabled, setSoundEnabled] = useState(true);
+
+      // Session Control
+      const [sessionState, setSessionState] = useState('idle'); // 'idle' | 'prompt' | 'reveal'
+      const [currentPrompt, setCurrentPrompt] = useState(null);
+      const [history, setHistory] = useState([]);
+      const [stats, setStats] = useState({ correct: 0, total: 0 });
+
+      // Automation loop tracking (ms remaining)
+      const [msLeft, setMsLeft] = useState(0);
+      const timerRef = useRef(null);
+
+      // Auto enable sound when picking Ear training
+      const handleTrainingFocusChange = (focusVal) => {
+        setTrainingFocus(focusVal);
+        if (focusVal === 'ear') {
+          setSoundEnabled(true);
+        }
+      };
+
+      // Toggles
+      const toggleRoot = (offset) => {
+        if (selectedRoots.includes(offset)) {
+          if (selectedRoots.length > 1) {
+            setSelectedRoots(selectedRoots.filter(r => r !== offset));
+          }
+        } else {
+          setSelectedRoots([...selectedRoots, offset]);
+        }
+      };
+
+      const toggleQuality = (levelKey, qualityId) => {
+        const currentList = selectedQualities[levelKey];
+        let newList;
+        if (currentList.includes(qualityId)) {
+          if (currentList.length > 1) {
+            newList = currentList.filter(id => id !== qualityId);
+          } else {
+            return;
+          }
+        } else {
+          newList = [...currentList, qualityId];
+        }
+        setSelectedQualities({ ...selectedQualities, [levelKey]: newList });
+      };
+
+      const toggleInversion = (invVal) => {
+        if (selectedInversions.includes(invVal)) {
+          if (selectedInversions.length > 1) {
+            setSelectedInversions(selectedInversions.filter(i => i !== invVal));
+          }
+        } else {
+          setSelectedInversions([...selectedInversions, invVal].sort());
+        }
+      };
+
+      const selectAllRoots = () => setSelectedRoots(ROOTS.map(r => r.offset));
+      const selectNoRoots = () => setSelectedRoots([0]);
+
+      const selectAllQualities = (lvl) => {
+        setSelectedQualities({
+          ...selectedQualities,
+          [lvl]: LEVELS[lvl].qualities.map(q => q.id)
+        });
+      };
+
+      const generatePrompt = () => {
+        const validRoots = ROOTS.filter(r => selectedRoots.includes(r.offset));
+        const validQualities = LEVELS[level].qualities.filter(q => selectedQualities[level].includes(q.id));
+
+        if (validRoots.length === 0 || validQualities.length === 0) {
+          return null;
+        }
+
+        const chosenRootObj = validRoots[Math.floor(Math.random() * validRoots.length)];
+        const chosenQualityObj = validQualities[Math.floor(Math.random() * validQualities.length)];
+
+        const numNotes = chosenQualityObj.semitones.length;
+        let allowedInversions = selectedInversions.filter(inv => inv < numNotes);
+        if (allowedInversions.length === 0) {
+          allowedInversions = [0];
+        }
+
+        const inversionIdx = allowedInversions[Math.floor(Math.random() * allowedInversions.length)];
+        
+        let inversionName = 'Root Position';
+        if (inversionIdx === 1) inversionName = '1st Inversion';
+        else if (inversionIdx === 2) inversionName = '2nd Inversion';
+        else if (inversionIdx === 3) inversionName = '3rd Inversion';
+        else if (inversionIdx > 3) inversionName = `${inversionIdx}th Inversion`;
+
+        const baseMidi = 60 + chosenRootObj.offset;
+        let notes = chosenQualityObj.semitones.map(semi => baseMidi + semi);
+
+        for (let i = 0; i < inversionIdx; i++) {
+          notes[i] = notes[i] + 12;
+        }
+        notes.sort((a, b) => a - b);
+
+        while (Math.max(...notes) > KEYBOARD_MAX_MIDI) {
+          notes = notes.map(n => n - 12);
+        }
+        while (Math.min(...notes) < KEYBOARD_MIN_MIDI) {
+          notes = notes.map(n => n + 12);
+        }
+
+        const rootDisplay = chosenRootObj.name.includes('/') 
+          ? (chosenRootObj.preferredAccidental === 'flat' ? chosenRootObj.name.split('/')[1].trim() : chosenRootObj.name.split('/')[0].trim())
+          : chosenRootObj.name;
+
+        const chordSymbol = chosenQualityObj.suffix || '';
+        const nameLabel = level === 'intervals' ? `${rootDisplay} - ${chosenQualityObj.name}` : `${rootDisplay}${chordSymbol}`;
+        const spelledNotes = notes.map(n => getSpelledNote(n, chosenRootObj.preferredAccidental));
+
+        return {
+          id: Date.now(),
+          rootName: rootDisplay,
+          qualityName: chosenQualityObj.name,
+          label: nameLabel,
+          inversionIdx,
+          inversionName,
+          notes,
+          spelledNotes,
+          accidentalPreference: chosenRootObj.preferredAccidental
+        };
+      };
+
+      // Flow Action Handlers
+      const handleStart = () => {
+        const prompt = generatePrompt();
+        if (!prompt) {
+          alert("Error: Ensure you selected at least one root note and one quality option!");
+          return;
+        }
+        setCurrentPrompt(prompt);
+        setSessionState('prompt');
+        setStats({ correct: 0, total: 0 });
+        setHistory([]);
+        
+        if (isAutoMode) {
+          setMsLeft(autoSeconds * 1000);
+        }
+
+        // Ear Training starts playing immediately on prompt
+        if (trainingFocus === 'ear') {
+          playKeyboardChord(prompt.notes);
+        }
+      };
+
+      const handleNext = () => {
+        const prompt = generatePrompt();
+        if (prompt) {
+          setCurrentPrompt(prompt);
+          setSessionState('prompt');
+          if (isAutoMode) {
+            setMsLeft(autoSeconds * 1000);
+          }
+          if (trainingFocus === 'ear') {
+            playKeyboardChord(prompt.notes);
+          }
+        }
+      };
+
+      const handleReveal = () => {
+        setSessionState('reveal');
+        if (soundEnabled && currentPrompt) {
+          playKeyboardChord(currentPrompt.notes);
+        }
+        if (isAutoMode) {
+          setMsLeft(autoSeconds * 1000);
+        }
+      };
+
+      const handleEndSession = () => {
+        setSessionState('idle');
+        setCurrentPrompt(null);
+        if (timerRef.current) clearInterval(timerRef.current);
+      };
+
+      const recordUserRecall = (success) => {
+        if (!currentPrompt) return;
+        
+        const alreadyLogged = history.some(h => h.id === currentPrompt.id && h.status !== undefined);
+        if (alreadyLogged) return;
+
+        setHistory(prev => [
+          {
+            id: currentPrompt.id,
+            label: currentPrompt.label,
+            inversion: currentPrompt.inversionName,
+            status: success ? 'correct' : 'incorrect',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          },
+          ...prev
+        ]);
+
+        setStats(prev => ({
+          correct: prev.correct + (success ? 1 : 0),
+          total: prev.total + 1
+        }));
+
+        handleNext();
+      };
+
+      // Spacebar & Escape keyboard bindings
+      useEffect(() => {
+        const handleKeyDown = (e) => {
+          if (sessionState === 'idle') return;
+
+          if (e.code === 'Space') {
+            e.preventDefault();
+            if (sessionState === 'prompt') {
+              handleReveal();
+            } else if (sessionState === 'reveal') {
+              handleNext();
+            }
+          } else if (e.code === 'Escape') {
+            e.preventDefault();
+            handleEndSession();
+          }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+      }, [sessionState, currentPrompt, isAutoMode, autoSeconds, trainingFocus]);
+
+      useEffect(() => {
+        if (sessionState === 'idle' || !isAutoMode) {
+          if (timerRef.current) clearInterval(timerRef.current);
+          return;
+        }
+
+        const intervalMs = 100;
+        timerRef.current = setInterval(() => {
+          setMsLeft(prev => {
+            if (prev <= intervalMs) {
+              if (sessionState === 'prompt') {
+                setSessionState('reveal');
+                if (soundEnabled && currentPrompt) {
+                  playKeyboardChord(currentPrompt.notes);
+                }
+                return autoSeconds * 1000;
+              } else {
+                const nextP = generatePrompt();
+                if (nextP) {
+                  setCurrentPrompt(nextP);
+                  setSessionState('prompt');
+                  if (trainingFocus === 'ear') {
+                    playKeyboardChord(nextP.notes);
+                  }
+                  return autoSeconds * 1000;
+                }
+              }
+            }
+            return prev - intervalMs;
+          });
+        }, intervalMs);
+
+        return () => {
+          if (timerRef.current) clearInterval(timerRef.current);
+        };
+      }, [sessionState, isAutoMode, autoSeconds, currentPrompt, soundEnabled, trainingFocus]);
+
+      // Geometry Constants for 37 visual piano keys
+      const totalWhiteKeys = 22;
+      const svgWidth = 1000;
+      const svgHeight = 220;
+      const whiteKeyWidth = svgWidth / totalWhiteKeys;
+      const blackKeyWidth = whiteKeyWidth * 0.62;
+      const blackKeyHeight = svgHeight * 0.62;
+
+      const getPianoKeyVisualData = (midi) => {
+        const offset = midi - KEYBOARD_MIN_MIDI;
+        const noteInOctave = offset % 12;
+        const octaveMultiplier = Math.floor(offset / 12);
+
+        const whiteKeyOffsets = [0, 2, 4, 5, 7, 9, 11];
+        const isWhite = whiteKeyOffsets.includes(noteInOctave);
+
+        if (isWhite) {
+          const indexInOctave = whiteKeyOffsets.indexOf(noteInOctave);
+          const whiteIndex = octaveMultiplier * 7 + indexInOctave;
+          return { isWhite, whiteIndex, midi };
+        } else {
+          const blackOffsetsMap = { 1: 0, 3: 1, 6: 3, 8: 4, 10: 5 };
+          const leftWhiteIndex = octaveMultiplier * 7 + blackOffsetsMap[noteInOctave];
+          return { isWhite, leftWhiteIndex, midi };
+        }
+      };
+
+      const allKeys = [];
+      for (let m = KEYBOARD_MIN_MIDI; m <= KEYBOARD_MAX_MIDI; m++) {
+        allKeys.push(getPianoKeyVisualData(m));
+      }
+
+      const whiteKeys = allKeys.filter(k => k.isWhite);
+      const blackKeys = allKeys.filter(k => !k.isWhite);
+
+      return (
+        <div className="min-h-screen flex flex-col justify-between">
+          
+          {/* Top Elegant Navbar */}
+          <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50 px-6 py-4">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                  <i className="fa-solid fa-music text-white text-lg"></i>
+                </div>
+                <div>
+                  <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-white to-slate-300 bg-clip-text text-transparent">
+                    CADENCE
+                  </h1>
+                  <p className="text-xs text-slate-400 font-medium">Professional Chord Recall & Ear Trainer</p>
+                </div>
+              </div>
+
+              {/* Stats panel when practicing */}
+              {sessionState !== 'idle' && (
+                <div className="flex items-center gap-6 bg-slate-950/60 px-4 py-2 rounded-xl border border-slate-800/80">
+                  <div className="text-center sm:text-left">
+                    <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase block">CURRENT TYPE</span>
+                    <span className="text-xs font-semibold text-indigo-400">
+                      {trainingFocus === 'visual' ? 'Visual Recall' : 'Ear Training'}
+                    </span>
+                  </div>
+                  <div className="h-6 w-px bg-slate-800"></div>
+                  <div className="text-center">
+                    <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase block">PRACTICED</span>
+                    <span className="text-sm font-bold text-slate-200 mono-font">{stats.total}</span>
+                  </div>
+                  <div className="h-6 w-px bg-slate-800"></div>
+                  <div className="text-center">
+                    <span className="text-[10px] text-slate-500 font-bold tracking-wider uppercase block">SUCCESS RATE</span>
+                    <span className="text-sm font-bold text-emerald-400 mono-font">
+                      {stats.total > 0 ? `${Math.round((stats.correct / stats.total) * 100)}%` : '--'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Quick UI Toggles */}
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={() => setSoundEnabled(!soundEnabled)}
+                  disabled={trainingFocus === 'ear'}
+                  className={`p-2.5 rounded-xl border transition-all ${
+                    soundEnabled 
+                      ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20' 
+                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                  } ${trainingFocus === 'ear' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  title={trainingFocus === 'ear' ? "Sound always active in Ear Training Mode" : "Mute Feedback Sounds"}
+                >
+                  <i className={`fa-solid ${soundEnabled ? 'fa-volume-high' : 'fa-volume-xmark'} text-sm`}></i>
+                </button>
+                <button 
+                  onClick={() => setShowLabels(!showLabels)}
+                  className={`p-2.5 rounded-xl border transition-all ${
+                    showLabels 
+                      ? 'bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20' 
+                      : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-300'
+                  }`}
+                  title="Toggle Key Labels"
+                >
+                  <i className="fa-solid fa-tag text-sm"></i>
+                </button>
+              </div>
+            </div>
+          </header>
+
+          {/* Main Workspace */}
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-8 flex flex-col justify-center">
+            {sessionState === 'idle' ? (
+              /* --- CONFIGURATION SCREEN --- */
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start animate-fade-in">
+                
+                {/* Left Controls Column */}
+                <div className="lg:col-span-8 space-y-6">
+                  
+                  {/* Step 1: Training Type & Mode Select */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-indigo-400 text-sm font-extrabold uppercase bg-indigo-950/80 px-2.5 py-1 rounded-md">Step 1</span>
+                      <h2 className="text-lg font-bold">Choose Training Focus</h2>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <button
+                        onClick={() => handleTrainingFocusChange('visual')}
+                        className={`p-5 rounded-xl text-left border transition-all relative overflow-hidden flex items-start gap-4 ${
+                          trainingFocus === 'visual' 
+                            ? 'bg-gradient-to-br from-indigo-950/40 to-slate-900 border-indigo-500/50 shadow-lg shadow-indigo-950/10' 
+                            : 'bg-slate-900/40 border-slate-800/60 hover:border-slate-700/60 hover:bg-slate-900/60'
+                        }`}
+                      >
+                        <div className={`p-3 rounded-xl ${trainingFocus === 'visual' ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                          <i className="fa-solid fa-eye text-lg"></i>
+                        </div>
+                        <div>
+                          <span className={`font-bold text-sm block ${trainingFocus === 'visual' ? 'text-indigo-200' : 'text-slate-200'}`}>
+                            Visual Recall Mode
+                          </span>
+                          <span className="text-xs text-slate-400 mt-1 block">
+                            Shows a chord or interval name first, then tests your muscle memory to construct it.
+                          </span>
+                        </div>
+                      </button>
+
+                      <button
+                        onClick={() => handleTrainingFocusChange('ear')}
+                        className={`p-5 rounded-xl text-left border transition-all relative overflow-hidden flex items-start gap-4 ${
+                          trainingFocus === 'ear' 
+                            ? 'bg-gradient-to-br from-indigo-950/40 to-slate-900 border-indigo-500/50 shadow-lg shadow-indigo-950/10' 
+                            : 'bg-slate-900/40 border-slate-800/60 hover:border-slate-700/60 hover:bg-slate-900/60'
+                        }`}
+                      >
+                        <div className={`p-3 rounded-xl ${trainingFocus === 'ear' ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                          <i className="fa-solid fa-ear-listening text-lg"></i>
+                        </div>
+                        <div>
+                          <span className={`font-bold text-sm block ${trainingFocus === 'ear' ? 'text-indigo-200' : 'text-slate-200'}`}>
+                            Ear Training Mode
+                          </span>
+                          <span className="text-xs text-slate-400 mt-1 block">
+                            Plays chord notes first without showing names. Identify notes or harmony strictly by sound.
+                          </span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Training Mode Level */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="text-indigo-400 text-sm font-extrabold uppercase bg-indigo-950/80 px-2.5 py-1 rounded-md">Step 2</span>
+                      <h2 className="text-lg font-bold">Select Complexity Level</h2>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {Object.entries(LEVELS).map(([key, value]) => (
+                        <button
+                          key={key}
+                          onClick={() => setLevel(key)}
+                          className={`flex flex-col items-start p-4 rounded-xl text-left border transition-all relative overflow-hidden ${
+                            level === key 
+                              ? 'bg-gradient-to-br from-indigo-950/40 to-slate-900 border-indigo-500/50' 
+                              : 'bg-slate-900/40 border-slate-800/60 hover:border-slate-700/60'
+                          }`}
+                        >
+                          <span className={`font-bold text-sm ${level === key ? 'text-indigo-300' : 'text-slate-300'}`}>
+                            {value.label}
+                          </span>
+                          <span className="text-xs text-slate-400 mt-1 line-clamp-1">
+                            {value.description}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Step 3: Root Notes Constraint */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-purple-400 text-sm font-extrabold uppercase bg-purple-950/80 px-2.5 py-1 rounded-md">Step 3</span>
+                        <h2 className="text-lg font-bold">Limit Root Notes</h2>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button onClick={selectAllRoots} className="text-indigo-400 hover:text-indigo-300 transition-colors font-medium">All</button>
+                        <span className="text-slate-700">|</span>
+                        <button onClick={selectNoRoots} className="text-slate-400 hover:text-slate-300 transition-colors font-medium">Clear</button>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                      {ROOTS.map((r) => {
+                        const isSelected = selectedRoots.includes(r.offset);
+                        return (
+                          <button
+                            key={r.offset}
+                            onClick={() => toggleRoot(r.offset)}
+                            className={`py-2 px-3 rounded-xl border text-center transition-all font-semibold text-sm ${
+                              isSelected 
+                                ? 'bg-purple-500/10 border-purple-500/40 text-purple-200' 
+                                : 'bg-slate-950/40 border-slate-900 text-slate-500 hover:border-slate-800 hover:text-slate-300'
+                            }`}
+                          >
+                            {r.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Step 4: Specific Chord Qualities */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-emerald-400 text-sm font-extrabold uppercase bg-emerald-950/80 px-2.5 py-1 rounded-md">Step 4</span>
+                        <h2 className="text-lg font-bold">Restrict Chord Colors / Qualities</h2>
+                      </div>
+                      <button 
+                        onClick={() => selectAllQualities(level)}
+                        className="text-emerald-400 hover:text-emerald-300 transition-colors text-xs font-medium"
+                      >
+                        Enable All For Level
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+                      {LEVELS[level].qualities.map((q) => {
+                        const isSelected = selectedQualities[level].includes(q.id);
+                        return (
+                          <button
+                            key={q.id}
+                            onClick={() => toggleQuality(level, q.id)}
+                            className={`flex items-center justify-between p-3 rounded-xl border text-left transition-all ${
+                              isSelected 
+                                ? 'bg-emerald-500/5 border-emerald-500/30 text-emerald-200' 
+                                : 'bg-slate-950/40 border-slate-900 text-slate-500 hover:border-slate-800 hover:text-slate-400'
+                            }`}
+                          >
+                            <span className="text-xs font-semibold">{q.name}</span>
+                            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 mono-font">
+                              {q.semitones.join(',')}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Step 5: Selective Inversion Control */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-amber-400 text-sm font-extrabold uppercase bg-amber-950/80 px-2.5 py-1 rounded-md">Step 5</span>
+                        <h2 className="text-lg font-bold">Restrict Inversions</h2>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button onClick={() => setSelectedInversions([0, 1, 2, 3])} className="text-amber-400 hover:text-amber-300 transition-colors font-medium">Select All</button>
+                        <span className="text-slate-700">|</span>
+                        <button onClick={() => setSelectedInversions([0])} className="text-slate-400 hover:text-slate-300 transition-colors font-medium">Root Only</button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {[
+                        { val: 0, label: 'Root Position', desc: 'No octave shifted components' },
+                        { val: 1, label: '1st Inversion', desc: 'Root shifted up 1 octave' },
+                        { val: 2, label: '2nd Inversion', desc: 'Root & third shifted' },
+                        { val: 3, label: '3rd Inversion', desc: '7th chord lowest tone' }
+                      ].map((inv) => {
+                        const isSelected = selectedInversions.includes(inv.val);
+                        return (
+                          <button
+                            key={inv.val}
+                            onClick={() => toggleInversion(inv.val)}
+                            className={`p-4 rounded-xl border text-left transition-all ${
+                              isSelected 
+                                ? 'bg-amber-500/10 border-amber-500/40 text-amber-200 shadow-md shadow-amber-950/10' 
+                                : 'bg-slate-950/40 border-slate-900 text-slate-500 hover:border-slate-800 hover:text-slate-400'
+                            }`}
+                          >
+                            <span className="text-sm font-bold block">{inv.label}</span>
+                            <span className="text-[10px] text-slate-500 mt-1 block">{inv.desc}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Right Settings Dashboard */}
+                <div className="lg:col-span-4 space-y-6">
+                  
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                      <i className="fa-solid fa-sliders text-indigo-400"></i>
+                      Training Mode Settings
+                    </h2>
+
+                    <div className="space-y-5">
+                      {/* Driver Selection */}
+                      <div>
+                        <span className="text-xs text-slate-400 font-bold uppercase block mb-2">Practice Driver</span>
+                        <div className="grid grid-cols-2 gap-2 bg-slate-950/80 p-1 rounded-xl border border-slate-800/60">
+                          <button
+                            onClick={() => setIsAutoMode(false)}
+                            className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                              !isAutoMode 
+                                ? 'bg-slate-800 text-white' 
+                                : 'text-slate-500 hover:text-slate-300'
+                            }`}
+                          >
+                            <i className="fa-solid fa-hand text-xs mr-1.5"></i>
+                            Manual Mode
+                          </button>
+                          <button
+                            onClick={() => setIsAutoMode(true)}
+                            className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                              isAutoMode 
+                                ? 'bg-slate-800 text-white' 
+                                : 'text-slate-500 hover:text-slate-300'
+                            }`}
+                          >
+                            <i className="fa-solid fa-clock text-xs mr-1.5"></i>
+                            Automatic
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Seconds Slider */}
+                      {isAutoMode && (
+                        <div className="p-3 bg-slate-950/40 border border-slate-800/60 rounded-xl space-y-2 animate-fade-in">
+                          <div className="flex justify-between items-center">
+                            <label className="text-xs text-slate-400 font-semibold">Change Interval</label>
+                            <span className="text-xs font-bold text-indigo-400 mono-font">{autoSeconds} Seconds</span>
+                          </div>
+                          <input 
+                            type="range" 
+                            min="2" 
+                            max="30" 
+                            value={autoSeconds}
+                            onChange={(e) => setAutoSeconds(parseInt(e.target.value))}
+                            className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-500"
+                          />
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            {trainingFocus === 'ear' 
+                              ? `Chords play in mystery mode for ${autoSeconds}s, then visually reveal note spellings & positions for ${autoSeconds}s.` 
+                              : `Each chord prompt is shown for ${autoSeconds}s, then revealed for ${autoSeconds}s.`
+                            }
+                          </p>
+                        </div>
+                      )}
+
+                      {!isAutoMode && (
+                        <div className="p-3 bg-slate-950/40 border border-slate-800/60 rounded-xl text-slate-400 space-y-1">
+                          <div className="flex items-center gap-2 text-xs font-bold text-indigo-300">
+                            <i className="fa-solid fa-keyboard"></i>
+                            Keyboard Controls Active
+                          </div>
+                          <p className="text-[10px] text-slate-500 leading-relaxed">
+                            Press <span className="text-slate-300 font-bold">Spacebar</span> to alternate between listening/prompting and showing the reveal states. Press <span className="text-slate-300 font-bold">Escape</span> to end session.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={handleStart}
+                    className="w-full py-5 rounded-2xl bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white font-extrabold tracking-wide text-md shadow-xl hover:brightness-110 flex items-center justify-center gap-3 transition-all"
+                  >
+                    <i className="fa-solid fa-play text-sm"></i>
+                    START PRACTICE SESSION
+                  </button>
+
+                  <div className="text-center">
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      For best ear-training results, try identifying the quality (major vs minor/diminished extensions) prior to pressing reveal.
+                    </p>
+                  </div>
+
+                </div>
+
+              </div>
+            ) : (
+              /* --- ACTIVE PRACTICE SCREEN --- */
+              <div className="flex flex-col gap-6 w-full max-w-5xl mx-auto animate-fade-in">
+                
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch">
+                  
+                  {/* Master Presentation Card */}
+                  <div className="md:col-span-8 bg-slate-900 border border-slate-800/80 rounded-2xl p-8 flex flex-col justify-between relative overflow-hidden shadow-2xl min-h-[360px]">
+                    
+                    {/* Header bar / Mode tags */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-2.5 w-2.5 relative">
+                          <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${sessionState === 'prompt' ? 'bg-amber-400' : 'bg-indigo-500'}`}></span>
+                          <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${sessionState === 'prompt' ? 'bg-amber-500' : 'bg-indigo-600'}`}></span>
+                        </span>
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
+                          {sessionState === 'prompt' ? 'Listening & Recall Stage' : 'Identification Revealed'}
+                        </span>
+                      </div>
+
+                      {/* Auto Mode status timer */}
+                      {isAutoMode ? (
+                        <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-full border border-slate-800">
+                          <span className="text-[10px] text-slate-500 font-bold">NEXT IN</span>
+                          <span className="text-xs font-bold text-indigo-400 mono-font">{(msLeft / 1000).toFixed(1)}s</span>
+                          <div className="w-2.5 h-2.5 rounded-full border border-slate-700 overflow-hidden relative">
+                            <div 
+                              className="bg-indigo-500 absolute bottom-0 left-0 right-0 transition-all duration-100" 
+                              style={{ height: `${(msLeft / (autoSeconds * 1000)) * 100}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="hidden sm:flex items-center gap-1.5 text-[10px] text-slate-500 bg-slate-950/60 border border-slate-800 px-2 py-1 rounded-lg">
+                          <span className="bg-slate-800 text-slate-400 font-bold px-1 rounded">Space</span>
+                          to {sessionState === 'prompt' ? 'Reveal' : 'Next'}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Dynamic Prompt / Audio UI */}
+                    <div className="my-8 text-center flex flex-col items-center justify-center min-h-[140px] space-y-6">
+                      {currentPrompt && (
+                        trainingFocus === 'ear' && sessionState === 'prompt' ? (
+                          // Mystery Sound state: Hide textual name, render visual equalizer waves
+                          <div className="space-y-6 flex flex-col items-center">
+                            <div className="flex items-end justify-center gap-2 h-14">
+                              <div className="w-2 bg-indigo-500 rounded-full animate-eq-1"></div>
+                              <div className="w-2 bg-indigo-400 rounded-full animate-eq-2"></div>
+                              <div className="w-2 bg-purple-500 rounded-full animate-eq-3"></div>
+                              <div className="w-2 bg-indigo-400 rounded-full animate-eq-4"></div>
+                              <div className="w-2 bg-purple-400 rounded-full animate-eq-5"></div>
+                            </div>
+                            <div className="space-y-1">
+                              <h3 className="text-2xl font-bold text-slate-200">Listening to Mystery Chord...</h3>
+                              <p className="text-xs text-slate-400">Can you identify the chord and inversion by sound?</p>
+                            </div>
+                            <button
+                              onClick={() => playKeyboardChord(currentPrompt.notes)}
+                              className="py-2 px-4 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700/60 text-indigo-300 hover:text-indigo-200 text-xs font-bold transition-all flex items-center gap-2"
+                            >
+                              <i className="fa-solid fa-volume-high"></i>
+                              Replay Audio
+                            </button>
+                          </div>
+                        ) : (
+                          // Standard Reveal or Visual Recall state: render beautiful, high contrast badges
+                          <>
+                            <h3 className="text-5xl md:text-6xl font-black tracking-tight bg-gradient-to-r from-white via-slate-100 to-indigo-300 bg-clip-text text-transparent">
+                              {currentPrompt.label}
+                            </h3>
+                            <div>
+                              <div className="inline-flex items-center gap-2.5 bg-indigo-500/10 px-6 py-3 rounded-full border-2 border-indigo-500/80 text-sm md:text-base font-extrabold text-indigo-100 tracking-wider uppercase shadow-xl shadow-indigo-500/20">
+                                <i className="fa-solid fa-arrows-spin text-indigo-400 animate-spin-slow"></i>
+                                <span>{currentPrompt.inversionName}</span>
+                              </div>
+                            </div>
+                          </>
+                        )
+                      )}
+                    </div>
+
+                    {/* Note spellings & reveal actions */}
+                    <div className="mt-4 flex flex-col sm:flex-row items-center justify-between border-t border-slate-800/80 pt-6 gap-4">
+                      <div className="flex flex-wrap items-center gap-2 justify-center sm:justify-start">
+                        <span className="text-[11px] text-slate-500 font-bold uppercase tracking-wider block">Notes:</span>
+                        {sessionState === 'reveal' && currentPrompt ? (
+                          currentPrompt.spelledNotes.map((note, index) => (
+                            <span 
+                              key={index} 
+                              className="px-2.5 py-1 text-xs font-extrabold bg-slate-950 text-indigo-300 border border-indigo-950/40 rounded-lg shadow-sm"
+                            >
+                              {note}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-slate-500 italic">
+                            {trainingFocus === 'ear' ? 'Identify notes by sound...' : 'Press space or click reveal to spell out...'}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 w-full sm:w-auto">
+                        {trainingFocus === 'ear' && sessionState === 'reveal' && (
+                          <button
+                            onClick={() => playKeyboardChord(currentPrompt.notes)}
+                            className="mr-2 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-indigo-400 font-bold text-xs"
+                            title="Replay Audio"
+                          >
+                            <i className="fa-solid fa-rotate-right"></i>
+                          </button>
+                        )}
+                        {sessionState === 'prompt' ? (
+                          <button
+                            onClick={handleReveal}
+                            className="flex-1 sm:flex-initial py-2.5 px-6 rounded-xl bg-indigo-500 text-white font-extrabold text-xs tracking-wider hover:bg-indigo-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"
+                          >
+                            <i className="fa-solid fa-eye text-[11px]"></i>
+                            REVEAL KEYS
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleNext}
+                            className="flex-1 sm:flex-initial py-2.5 px-6 rounded-xl bg-slate-800 text-white font-extrabold text-xs tracking-wider hover:bg-slate-700 border border-slate-700 transition-all flex items-center justify-center gap-2"
+                          >
+                            NEXT ASSIGNMENT
+                            <i className="fa-solid fa-arrow-right text-[11px]"></i>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+
+                  {/* Sidebar stats & History log */}
+                  <div className="md:col-span-4 bg-slate-900 border border-slate-800/80 rounded-2xl p-6 flex flex-col justify-between shadow-2xl">
+                    
+                    <div className="space-y-4">
+                      <h3 className="text-xs font-extrabold tracking-widest text-slate-400 uppercase">Self-Evaluation</h3>
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          onClick={() => recordUserRecall(true)}
+                          disabled={sessionState === 'prompt'}
+                          className={`py-3 rounded-xl border font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all ${
+                            sessionState === 'prompt' 
+                              ? 'bg-slate-950/20 border-slate-900 text-slate-700 cursor-not-allowed' 
+                              : 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/20'
+                          }`}
+                        >
+                          <i className="fa-solid fa-check text-md"></i>
+                          Got it!
+                        </button>
+                        <button
+                          onClick={() => recordUserRecall(false)}
+                          disabled={sessionState === 'prompt'}
+                          className={`py-3 rounded-xl border font-bold text-xs flex flex-col items-center justify-center gap-1 transition-all ${
+                            sessionState === 'prompt' 
+                              ? 'bg-slate-950/20 border-slate-900 text-slate-700 cursor-not-allowed' 
+                              : 'bg-rose-500/10 border-rose-500/40 text-rose-300 hover:bg-rose-500/20'
+                          }`}
+                        >
+                          <i className="fa-solid fa-triangle-exclamation text-md"></i>
+                          Need Work
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 mt-6 border-t border-slate-800/80 pt-4 flex flex-col justify-between overflow-hidden min-h-[140px]">
+                      <h3 className="text-xs font-extrabold tracking-widest text-slate-400 uppercase mb-3 block">Session History</h3>
+                      <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 max-h-[160px]">
+                        {history.length === 0 ? (
+                          <div className="h-full flex items-center justify-center text-center py-4">
+                            <span className="text-[10px] text-slate-600 font-bold uppercase tracking-wider">No chords logged yet</span>
+                          </div>
+                        ) : (
+                          history.map((item) => (
+                            <div 
+                              key={item.id} 
+                              className="flex items-center justify-between p-2 rounded-lg bg-slate-950/50 border border-slate-950 text-[11px] leading-tight animate-fade-in"
+                            >
+                              <div>
+                                <span className="font-bold text-slate-300 block">{item.label}</span>
+                                <span className="text-[9px] text-slate-500">{item.inversion}</span>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-[9px] text-slate-600 font-mono">{item.time}</span>
+                                <span className={`h-2.5 w-2.5 rounded-full ${item.status === 'correct' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleEndSession}
+                      className="w-full mt-4 py-2.5 border border-slate-800 text-slate-400 hover:bg-slate-800 hover:text-white transition-all rounded-xl text-xs font-bold flex items-center justify-center gap-2"
+                    >
+                      <i className="fa-solid fa-door-open text-[10px]"></i>
+                      End Session (Esc)
+                    </button>
+
+                  </div>
+
+                </div>
+
+                {/* Big Immersive Piano Visualizer Component */}
+                {}
+                <div className="bg-slate-900 border border-slate-800/80 rounded-2xl p-6 shadow-2xl">
+                  
+                  <div className="flex justify-between items-center mb-4">
+                    <span className="text-[11px] font-extrabold tracking-wider uppercase text-slate-500">
+                      {sessionState === 'prompt' && trainingFocus === 'ear' 
+                        ? 'Visual clues hidden during mystery listening phase' 
+                        : 'Visual confirmation diagram'
+                      }
+                    </span>
+                    <div className="flex items-center gap-4 text-[10px] text-slate-500">
+                      <div className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-indigo-500"></span>
+                        Chord Root
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="h-2 w-2 rounded-full bg-purple-500 animate-pulse"></span>
+                        Chord Notes
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="relative w-full aspect-[1000/220] select-none bg-slate-950 p-1.5 rounded-xl border border-slate-950/80">
+                    <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="w-full h-full">
+                      <defs>
+                        <linearGradient id="whiteKeyGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#4f46e5" />
+                          <stop offset="100%" stopColor="#818cf8" />
+                        </linearGradient>
+                        <linearGradient id="whiteKeyRootGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#312e81" />
+                          <stop offset="100%" stopColor="#6366f1" />
+                        </linearGradient>
+                        <linearGradient id="blackKeyGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#7c3aed" />
+                          <stop offset="100%" stopColor="#a78bfa" />
+                        </linearGradient>
+                        <linearGradient id="blackKeyRootGlow" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stopColor="#4c1d95" />
+                          <stop offset="100%" stopColor="#8b5cf6" />
+                        </linearGradient>
+                      </defs>
+
+                      {/* White Keys */}
+                      {whiteKeys.map((wk) => {
+                        const x = wk.whiteIndex * whiteKeyWidth;
+                        const isChordNote = currentPrompt && sessionState === 'reveal' && currentPrompt.notes.includes(wk.midi);
+                        const isRootNote = isChordNote && (wk.midi % 12 === ROOTS.find(r => r.name.includes(currentPrompt.rootName)).offset);
+
+                        let fillStyle = "fill-slate-100 hover:fill-slate-50 transition-colors";
+                        if (isChordNote) {
+                          fillStyle = isRootNote ? "fill-[url(#whiteKeyRootGlow)]" : "fill-[url(#whiteKeyGlow)]";
+                        }
+
+                        const labelName = getSpelledNote(wk.midi, currentPrompt?.accidentalPreference || 'sharp');
+
+                        return (
+                          <g key={wk.midi}>
+                            <rect
+                              x={x + 0.8}
+                              y={1}
+                              width={whiteKeyWidth - 1.6}
+                              height={svgHeight - 2}
+                              rx="4"
+                              ry="4"
+                              className={`${fillStyle} stroke-slate-400 stroke-[1px] cursor-pointer`}
+                              onClick={() => soundEnabled && playKeyboardChord([wk.midi])}
+                            />
+                            {showLabels && (
+                              <text
+                                x={x + whiteKeyWidth / 2}
+                                y={svgHeight - 16}
+                                textAnchor="middle"
+                                className={`text-[9px] font-bold tracking-tight select-none pointer-events-none ${
+                                  isChordNote ? 'fill-indigo-100' : 'fill-slate-500'
+                                }`}
+                              >
+                                {labelName}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      })}
+
+                      {/* Black Keys */}
+                      {blackKeys.map((bk) => {
+                        const x = (bk.leftWhiteIndex + 1) * whiteKeyWidth - (blackKeyWidth / 2);
+                        const isChordNote = currentPrompt && sessionState === 'reveal' && currentPrompt.notes.includes(bk.midi);
+                        const isRootNote = isChordNote && (bk.midi % 12 === ROOTS.find(r => r.name.includes(currentPrompt.rootName)).offset);
+
+                        let fillStyle = "fill-slate-900 hover:fill-slate-800 transition-colors";
+                        if (isChordNote) {
+                          fillStyle = isRootNote ? "fill-[url(#blackKeyRootGlow)]" : "fill-[url(#blackKeyGlow)]";
+                        }
+
+                        const labelName = getSpelledNote(bk.midi, currentPrompt?.accidentalPreference || 'sharp');
+
+                        return (
+                          <g key={bk.midi}>
+                            <rect
+                              x={x}
+                              y={1}
+                              width={blackKeyWidth}
+                              height={blackKeyHeight}
+                              rx="3"
+                              ry="3"
+                              className={`${fillStyle} stroke-slate-950 stroke-[1.5px] cursor-pointer drop-shadow-[0_4px_6px_rgba(0,0,0,0.45)]`}
+                              onClick={() => soundEnabled && playKeyboardChord([bk.midi])}
+                            />
+                            {showLabels && (
+                              <text
+                                x={x + blackKeyWidth / 2}
+                                y={blackKeyHeight - 12}
+                                textAnchor="middle"
+                                className={`text-[8px] font-bold select-none pointer-events-none ${
+                                  isChordNote ? 'fill-purple-100' : 'fill-slate-400'
+                                }`}
+                              >
+                                {labelName.replace(/[0-9]/g, '')}
+                              </text>
+                            )}
+                          </g>
+                        );
+                      })}
+
+                    </svg>
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </main>
+
+          {/* Clean Footer */}
+          <footer className="border-t border-slate-900 bg-slate-950/40 py-6 px-6 text-center">
+            <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+              <p>© 2026 Cadence Chord Practice Companion. Built for expert visual recall training.</p>
+              <div className="flex gap-4">
+                <a href="#" onClick={(e) => { e.preventDefault(); alert("Cadence Practice Tool uses standard chord voicing inversion formulas. Practice makes perfect!"); }} className="hover:text-slate-300 transition-colors">Formulas Documentation</a>
+                <span>•</span>
+                <span className="text-slate-600">Manual Modes are keyboard driven.</span>
+              </div>
+            </div>
+          </footer>
+
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
