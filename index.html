@@ -200,6 +200,85 @@
       }
     }
 
+    const BUILTIN_PRESETS = [
+      {
+        name: 'Triad Fundamentals',
+        description: 'Practice basic Major, Minor, and Diminished triads across standard roots.',
+        icon: 'fa-graduation-cap',
+        config: {
+          level: 'triads',
+          trainingFocus: 'visual',
+          selectedRoots: [0, 2, 4, 5, 7, 9, 11],
+          selectedQualities: {
+            intervals: ['m2', 'M2', 'm3', 'M3', 'P4', 'dim5', 'P5', 'm6', 'M6', 'm7', 'M7', 'Oct'],
+            triads: ['maj', 'min', 'dim'],
+            extended: ['maj7', 'm7', 'dom7'],
+            complex: ['7b5', '7#5', '7b9']
+          },
+          selectedInversions: [0, 1, 2],
+          isAutoMode: false,
+          autoSeconds: 5
+        }
+      },
+      {
+        name: 'Jazz Seventh Chords',
+        description: 'Master major, minor, dominant, and half-diminished 7ths in all positions.',
+        icon: 'fa-music',
+        config: {
+          level: 'extended',
+          trainingFocus: 'visual',
+          selectedRoots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+          selectedQualities: {
+            intervals: ['m2', 'M2', 'm3', 'M3', 'P4', 'dim5', 'P5', 'm6', 'M6', 'm7', 'M7', 'Oct'],
+            triads: ['maj', 'min', 'dim'],
+            extended: ['maj7', 'm7', 'dom7', 'm7b5'],
+            complex: ['7b5', '7#5', '7b9']
+          },
+          selectedInversions: [0, 1, 2, 3],
+          isAutoMode: false,
+          autoSeconds: 5
+        }
+      },
+      {
+        name: 'Altered Dominants Drill',
+        description: 'Rapid recall of altered dominants (7b5, 7#5, 7b9, 7#9) in Root Position.',
+        icon: 'fa-bolt',
+        config: {
+          level: 'complex',
+          trainingFocus: 'visual',
+          selectedRoots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+          selectedQualities: {
+            intervals: ['m2', 'M2', 'm3', 'M3', 'P4', 'dim5', 'P5', 'm6', 'M6', 'm7', 'M7', 'Oct'],
+            triads: ['maj', 'min', 'dim'],
+            extended: ['maj7', 'm7', 'dom7'],
+            complex: ['7b5', '7#5', '7b9', '7#9']
+          },
+          selectedInversions: [0],
+          isAutoMode: false,
+          autoSeconds: 5
+        }
+      },
+      {
+        name: 'Lush Ear Training',
+        description: 'Listen to jazz 9th extensions and identify them by ear.',
+        icon: 'fa-headphones',
+        config: {
+          level: 'extended',
+          trainingFocus: 'ear',
+          selectedRoots: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+          selectedQualities: {
+            intervals: ['m2', 'M2', 'm3', 'M3', 'P4', 'dim5', 'P5', 'm6', 'M6', 'm7', 'M7', 'Oct'],
+            triads: ['maj', 'min', 'dim'],
+            extended: ['maj9', 'm9', 'dom9'],
+            complex: ['7b5', '7#5', '7b9']
+          },
+          selectedInversions: [0],
+          isAutoMode: false,
+          autoSeconds: 5
+        }
+      }
+    ];
+
     function App() {
       // Configuration
       const [level, setLevel] = useState('triads');
@@ -218,6 +297,71 @@
       const [autoSeconds, setAutoSeconds] = useState(5);
       const [showLabels, setShowLabels] = useState(true);
       const [soundEnabled, setSoundEnabled] = useState(true);
+
+      // Presets & Custom Saved Playlists States
+      const [customPresets, setCustomPresets] = useState(() => {
+        try {
+          const saved = localStorage.getItem('cadence_custom_presets');
+          return saved ? JSON.parse(saved) : [];
+        } catch (e) {
+          return [];
+        }
+      });
+      const [newPresetName, setNewPresetName] = useState('');
+
+      useEffect(() => {
+        try {
+          localStorage.setItem('cadence_custom_presets', JSON.stringify(customPresets));
+        } catch (e) {
+          console.error("Failed to save custom presets:", e);
+        }
+      }, [customPresets]);
+
+      const loadPreset = useCallback((preset) => {
+        const c = preset.config;
+        if (!c) return;
+        
+        setLevel(c.level);
+        setTrainingFocus(c.trainingFocus);
+        setSelectedRoots(c.selectedRoots);
+        setSelectedQualities(prev => ({
+          ...prev,
+          ...c.selectedQualities
+        }));
+        setSelectedInversions(c.selectedInversions);
+        setIsAutoMode(c.isAutoMode);
+        setAutoSeconds(c.autoSeconds);
+      }, []);
+
+      const saveCustomPreset = useCallback((e) => {
+        e.preventDefault();
+        if (!newPresetName.trim()) {
+          alert("Please enter a name for your preset.");
+          return;
+        }
+        
+        const newPreset = {
+          id: Date.now(),
+          name: newPresetName.trim(),
+          description: `Custom Preset created on ${new Date().toLocaleDateString()}`,
+          config: {
+            level,
+            trainingFocus,
+            selectedRoots,
+            selectedQualities,
+            selectedInversions,
+            isAutoMode,
+            autoSeconds
+          }
+        };
+        
+        setCustomPresets(prev => [...prev, newPreset]);
+        setNewPresetName('');
+      }, [level, trainingFocus, selectedRoots, selectedQualities, selectedInversions, isAutoMode, autoSeconds, newPresetName]);
+
+      const deleteCustomPreset = useCallback((id) => {
+        setCustomPresets(prev => prev.filter(p => p.id !== id));
+      }, []);
 
       // Session Control
       const [sessionState, setSessionState] = useState('idle'); // 'idle' | 'prompt' | 'reveal'
@@ -688,6 +832,87 @@
                 
                 {/* Left Controls Column */}
                 <div className="lg:col-span-8 space-y-6">
+
+                  {/* Step 0: Playlists & Presets */}
+                  <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
+                    <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-indigo-400 text-sm font-extrabold uppercase bg-indigo-950/80 px-2.5 py-1 rounded-md">Quick Start</span>
+                        <h2 className="text-lg font-bold">Practice Playlists & Presets</h2>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                      {BUILTIN_PRESETS.map((preset, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => loadPreset(preset)}
+                          className="p-4 rounded-xl text-left border border-slate-800 bg-slate-950/30 hover:border-indigo-500/50 hover:bg-slate-900/40 transition-all flex flex-col justify-between min-h-[120px]"
+                        >
+                          <div className="flex items-center gap-2 mb-2 text-indigo-400">
+                            <i className={`fa-solid ${preset.icon} text-md`}></i>
+                            <span className="font-bold text-xs leading-tight text-slate-200">{preset.name}</span>
+                          </div>
+                          <span className="text-[10px] text-slate-500 leading-normal mb-2 block">{preset.description}</span>
+                          <span className="text-[9px] text-indigo-300 font-extrabold tracking-wider uppercase block">Load Drill &rarr;</span>
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="pt-4 border-t border-slate-800/80">
+                      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Your Saved Presets</h3>
+                      
+                      <div className="space-y-2 mb-4">
+                        {customPresets.length === 0 ? (
+                          <p className="text-[10px] text-slate-500 italic">
+                            No custom presets saved yet. Configure the options below and use the form to save your own configuration.
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                            {customPresets.map((preset) => (
+                              <div
+                                key={preset.id}
+                                className="flex items-center justify-between p-2.5 rounded-lg border border-slate-800/60 bg-slate-950/50 hover:border-slate-700 transition-all text-xs"
+                              >
+                                <button
+                                  onClick={() => loadPreset(preset)}
+                                  className="flex-1 text-left font-bold text-slate-300 hover:text-indigo-400 truncate mr-2"
+                                  title="Load preset"
+                                >
+                                  {preset.name}
+                                </button>
+                                <button
+                                  onClick={() => deleteCustomPreset(preset.id)}
+                                  className="text-[10px] text-slate-500 hover:text-rose-400 p-1"
+                                  title="Delete Preset"
+                                >
+                                  <i className="fa-solid fa-trash-can"></i>
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <form onSubmit={saveCustomPreset} className="flex gap-2 max-w-md">
+                        <input
+                          type="text"
+                          placeholder="Name current configuration..."
+                          value={newPresetName}
+                          onChange={(e) => setNewPresetName(e.target.value)}
+                          className="flex-1 px-3 py-1.5 rounded-xl border border-slate-800 bg-slate-950 text-xs text-slate-200 placeholder-slate-500 focus:border-indigo-500/50 outline-none"
+                        />
+                        <button
+                          type="submit"
+                          className="px-4 py-1.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/20 text-xs font-bold transition-all flex items-center gap-1.5"
+                        >
+                          <i className="fa-solid fa-floppy-disk"></i>
+                          Save Preset
+                        </button>
+                      </form>
+                    </div>
+
+                  </div>
                   
                   {/* Step 1: Training Type & Mode Select */}
                   <div className="bg-slate-900/60 border border-slate-800/80 rounded-2xl p-6">
