@@ -61,7 +61,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useRef } = React;
+    const { useState, useEffect, useRef, useCallback } = React;
 
     const ROOTS = [
       { name: 'C', offset: 0, preferredAccidental: 'sharp' },
@@ -231,6 +231,11 @@
 
       const isCurrentPromptGraded = currentPrompt && history.some(h => h.id === currentPrompt.id);
 
+      // Spaced repetition & focused pool states
+      const [failedPromptsPool, setFailedPromptsPool] = useState([]);
+      const [isPoolLimited, setIsPoolLimited] = useState(false);
+      const [limitedPool, setLimitedPool] = useState([]);
+
       // Auto enable sound when picking Ear training
       const handleTrainingFocusChange = (focusVal) => {
         setTrainingFocus(focusVal);
@@ -285,7 +290,28 @@
         });
       };
 
-      const generatePrompt = () => {
+      const generatePrompt = useCallback((ignorePools = false) => {
+        // 1. If pool is limited, pull from limitedPool
+        if (!ignorePools && isPoolLimited && limitedPool.length > 0) {
+          // 30% chance to practice a failed chord that is within the limited pool
+          const failedInPool = failedPromptsPool.filter(fp =>
+            limitedPool.some(lp => lp.label === fp.label && lp.inversionName === fp.inversionName)
+          );
+          if (failedInPool.length > 0 && Math.random() < 0.3) {
+            const chosen = failedInPool[Math.floor(Math.random() * failedInPool.length)];
+            return { ...chosen, id: Date.now() };
+          }
+          const chosen = limitedPool[Math.floor(Math.random() * limitedPool.length)];
+          return { ...chosen, id: Date.now() };
+        }
+
+        // 2. Spaced repetition: 30% chance to pull from failedPromptsPool
+        if (!ignorePools && failedPromptsPool.length > 0 && Math.random() < 0.3) {
+          const chosen = failedPromptsPool[Math.floor(Math.random() * failedPromptsPool.length)];
+          return { ...chosen, id: Date.now() };
+        }
+
+        // 3. Otherwise, generate a normal random prompt
         const validRoots = ROOTS.filter(r => selectedRoots.includes(r.offset));
         const validQualities = LEVELS[level].qualities.filter(q => selectedQualities[level].includes(q.id));
 
@@ -344,11 +370,24 @@
           spelledNotes,
           accidentalPreference: chosenRootObj.preferredAccidental
         };
-      };
+      }, [
+        level,
+        selectedRoots,
+        selectedQualities,
+        selectedInversions,
+        isPoolLimited,
+        limitedPool,
+        failedPromptsPool
+      ]);
 
       // Flow Action Handlers
       const handleStart = () => {
-        const prompt = generatePrompt();
+        // Reset spaced repetition and focus pool states
+        setFailedPromptsPool([]);
+        setIsPoolLimited(false);
+        setLimitedPool([]);
+
+        const prompt = generatePrompt(true);
         if (!prompt) {
           alert("Error: Ensure you selected at least one root note and one quality option!");
           return;
@@ -410,7 +449,8 @@
             label: currentPrompt.label,
             inversion: currentPrompt.inversionName,
             status: success ? 'correct' : 'incorrect',
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            promptObject: currentPrompt
           },
           ...prev
         ]);
@@ -420,10 +460,49 @@
           total: prev.total + 1
         }));
 
+        // Spaced repetition failed prompts pool management
+        if (success) {
+          setFailedPromptsPool(prev => prev.filter(p => p.label !== currentPrompt.label || p.inversionName !== currentPrompt.inversionName));
+        } else {
+          setFailedPromptsPool(prev => {
+            const exists = prev.some(p => p.label === currentPrompt.label && p.inversionName === currentPrompt.inversionName);
+            if (exists) return prev;
+            return [...prev, currentPrompt];
+          });
+        }
+
         if (!isAutoMode) {
           handleNext();
         }
       };
+
+      const toggleLimitPool = useCallback(() => {
+        if (sessionState === 'idle') return;
+        
+        setIsPoolLimited(prev => {
+          const nextVal = !prev;
+          if (nextVal) {
+            const currentPool = [
+              currentPrompt, 
+              ...history.map(h => h.promptObject)
+            ].filter(Boolean);
+            
+            const uniquePool = [];
+            const seen = new Set();
+            currentPool.forEach(p => {
+              const key = `${p.label}-${p.inversionName}`;
+              if (!seen.has(key)) {
+                seen.add(key);
+                uniquePool.push(p);
+              }
+            });
+            setLimitedPool(uniquePool);
+          } else {
+            setLimitedPool([]);
+          }
+          return nextVal;
+        });
+      }, [sessionState, currentPrompt, history]);
 
       // Spacebar & Escape keyboard bindings
       useEffect(() => {
@@ -440,6 +519,9 @@
           } else if (e.code === 'Escape') {
             e.preventDefault();
             handleEndSession();
+          } else if (e.code === 'KeyL' || e.code === 'KeyF') {
+            e.preventDefault();
+            toggleLimitPool();
           } else if (sessionState === 'reveal') {
             if (e.code === 'KeyG' || e.code === 'ArrowRight' || e.code === 'KeyY') {
               e.preventDefault();
@@ -453,7 +535,7 @@
 
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-      }, [sessionState, currentPrompt, isAutoMode, autoSeconds, trainingFocus, history]);
+      }, [sessionState, currentPrompt, isAutoMode, autoSeconds, trainingFocus, history, toggleLimitPool]);
 
       useEffect(() => {
         if (sessionState === 'idle' || !isAutoMode) {
@@ -490,7 +572,7 @@
         return () => {
           if (timerRef.current) clearInterval(timerRef.current);
         };
-      }, [sessionState, isAutoMode, autoSeconds, currentPrompt, soundEnabled, trainingFocus]);
+      }, [sessionState, isAutoMode, autoSeconds, currentPrompt, soundEnabled, trainingFocus, generatePrompt]);
 
       // Geometry Constants for 37 visual piano keys
       const totalWhiteKeys = 22;
@@ -890,60 +972,108 @@
                     </p>
                   </div>
 
-                  {history.length > 0 && (
-                    <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4 animate-fade-in">
-                      <div className="flex items-center justify-between">
-                        <h2 className="text-sm font-bold tracking-wider text-indigo-400 uppercase flex items-center gap-2">
-                          <i className="fa-solid fa-chart-simple"></i>
-                          Last Session Analysis
-                        </h2>
-                        <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 font-mono">
-                          {history.filter(h => h.status === 'correct').length} / {history.length} Correct
-                        </span>
-                      </div>
-                      
-                      <div className="bg-slate-950/60 rounded-xl p-4 border border-slate-800/60 flex items-center justify-between">
-                        <div>
-                          <span className="text-xs text-slate-400 font-semibold block">Success Rate</span>
-                          <span className="text-2xl font-black text-slate-200 mono-font">
-                            {Math.round((history.filter(h => h.status === 'correct').length / history.length) * 100)}%
+                  {history.length > 0 && (() => {
+                    const chordStats = history.reduce((acc, item) => {
+                      const key = `${item.label} (${item.inversion})`;
+                      if (!acc[key]) {
+                        acc[key] = {
+                          label: item.label,
+                          inversion: item.inversion,
+                          correct: 0,
+                          total: 0,
+                          attempts: []
+                        };
+                      }
+                      acc[key].total += 1;
+                      if (item.status === 'correct') {
+                        acc[key].correct += 1;
+                      }
+                      acc[key].attempts.push(item.status);
+                      return acc;
+                    }, {});
+
+                    const statsList = Object.values(chordStats).map(s => {
+                      s.attempts.reverse();
+                      s.rate = Math.round((s.correct / s.total) * 100);
+                      return s;
+                    }).sort((a, b) => a.rate - b.rate);
+
+                    return (
+                      <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 space-y-4 animate-fade-in">
+                        <div className="flex items-center justify-between">
+                          <h2 className="text-sm font-bold tracking-wider text-indigo-400 uppercase flex items-center gap-2">
+                            <i className="fa-solid fa-chart-simple"></i>
+                            Last Session Analysis
+                          </h2>
+                          <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-400 font-mono">
+                            {history.filter(h => h.status === 'correct').length} / {history.length} Correct
                           </span>
                         </div>
-                        <div className="text-right">
-                          <span className="text-xs text-slate-400 font-semibold block">Total Chords</span>
-                          <span className="text-2xl font-black text-slate-200 mono-font">{history.length}</span>
+                        
+                        <div className="bg-slate-950/60 rounded-xl p-4 border border-slate-800/60 flex items-center justify-between">
+                          <div>
+                            <span className="text-xs text-slate-400 font-semibold block">Success Rate</span>
+                            <span className="text-2xl font-black text-slate-200 mono-font">
+                              {Math.round((history.filter(h => h.status === 'correct').length / history.length) * 100)}%
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-xs text-slate-400 font-semibold block">Total Chords</span>
+                            <span className="text-2xl font-black text-slate-200 mono-font">{history.length}</span>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="space-y-3">
-                        {history.some(h => h.status === 'incorrect') && (
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] text-rose-400 font-bold uppercase tracking-wider block">Needs Work</span>
-                            <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
-                              {Array.from(new Set(history.filter(h => h.status === 'incorrect').map(h => `${h.label} (${h.inversion})`))).map((chordLabel, idx) => (
-                                <span key={idx} className="px-2.5 py-1 text-[10px] font-bold bg-rose-500/10 text-rose-300 border border-rose-500/20 rounded-lg">
-                                  {chordLabel}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
+                        <div className="space-y-3">
+                          <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-wider block border-b border-slate-800/60 pb-1">
+                            Chord Performance (Worst to Best)
+                          </span>
+                          
+                          <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                            {statsList.map((chord, idx) => {
+                              let rateBadgeClass = "bg-rose-500/10 text-rose-300 border-rose-500/20";
+                              if (chord.rate >= 80) {
+                                rateBadgeClass = "bg-emerald-500/10 text-emerald-300 border-emerald-500/20";
+                              } else if (chord.rate >= 50) {
+                                rateBadgeClass = "bg-amber-500/10 text-amber-300 border-amber-500/20";
+                              }
 
-                        {history.some(h => h.status === 'correct') && (
-                          <div className="space-y-1.5">
-                            <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider block">Mastered</span>
-                            <div className="flex flex-wrap gap-1.5 max-h-[120px] overflow-y-auto pr-1">
-                              {Array.from(new Set(history.filter(h => h.status === 'correct').map(h => `${h.label} (${h.inversion})`))).map((chordLabel, idx) => (
-                                <span key={idx} className="px-2.5 py-1 text-[10px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 rounded-lg">
-                                  {chordLabel}
-                                </span>
-                              ))}
-                            </div>
+                              return (
+                                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between p-2.5 rounded-xl bg-slate-950/40 border border-slate-800/80 gap-2 text-xs">
+                                  <div className="min-w-0">
+                                    <span className="font-bold text-slate-200 block truncate">{chord.label}</span>
+                                    <span className="text-[10px] text-slate-500 truncate block">{chord.inversion}</span>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-3 self-end sm:self-center">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold border font-mono ${rateBadgeClass}`}>
+                                      {chord.rate}% ({chord.correct}/{chord.total})
+                                    </span>
+                                    
+                                    <div className="flex gap-1">
+                                      {chord.attempts.map((att, aIdx) => (
+                                        <span 
+                                          key={aIdx} 
+                                          className={`w-4.5 h-4.5 rounded flex items-center justify-center text-[9px] font-black font-mono border ${
+                                            att === 'correct'
+                                              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                              : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                          }`}
+                                          title={att === 'correct' ? "Correct" : "Incorrect"}
+                                        >
+                                          {att === 'correct' ? '✔' : '✘'}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
                           </div>
-                        )}
+                        </div>
+
                       </div>
-                    </div>
-                  )}
+                    );
+                  })()}
 
                 </div>
 
@@ -964,8 +1094,13 @@
                           <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${sessionState === 'prompt' ? 'bg-amber-400' : 'bg-indigo-500'}`}></span>
                           <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${sessionState === 'prompt' ? 'bg-amber-500' : 'bg-indigo-600'}`}></span>
                         </span>
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">
-                          {sessionState === 'prompt' ? 'Listening & Recall Stage' : 'Identification Revealed'}
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                          <span>{sessionState === 'prompt' ? 'Listening & Recall Stage' : 'Identification Revealed'}</span>
+                          {isPoolLimited && (
+                            <span className="text-[9px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-mono font-bold animate-pulse">
+                              Focused Pool
+                            </span>
+                          )}
                         </span>
                       </div>
 
@@ -1118,6 +1253,41 @@
                           <span className="text-[9px] opacity-60 font-mono font-normal">W / ←</span>
                         </button>
                       </div>
+                    </div>
+
+                    {/* Focus / Lock Pool Controls */}
+                    <div className="mt-5 pt-4 border-t border-slate-800/80 space-y-2">
+                      <h3 className="text-xs font-extrabold tracking-widest text-slate-400 uppercase flex items-center justify-between">
+                        <span>Focused Training</span>
+                        {isPoolLimited && (
+                          <span className="text-[9px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded-full font-bold animate-pulse">
+                            ACTIVE
+                          </span>
+                        )}
+                      </h3>
+                      
+                      <button
+                        onClick={toggleLimitPool}
+                        className={`w-full py-2.5 px-4 rounded-xl border font-bold text-xs flex items-center justify-between transition-all ${
+                          isPoolLimited
+                            ? 'bg-gradient-to-r from-amber-500/20 to-orange-500/20 border-amber-500/50 text-amber-300 shadow-lg shadow-amber-950/20'
+                            : 'bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-300'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <i className={`fa-solid ${isPoolLimited ? 'fa-lock text-amber-400' : 'fa-lock-open opacity-50'}`}></i>
+                          <span>
+                            {isPoolLimited ? `Focusing on ${limitedPool.length} Chords` : 'Limit Pool to Current Chords'}
+                          </span>
+                        </div>
+                        <span className="text-[9px] bg-slate-800/80 px-1.5 py-0.5 rounded font-mono opacity-80">L / F</span>
+                      </button>
+                      <p className="text-[10px] text-slate-500 leading-normal">
+                        {isPoolLimited 
+                          ? "Repetitive mode active. App is only generating prompts from the active chords in this session."
+                          : "Limit the chord pool to the unique chords practiced so far in this session to build recognition via repetition."
+                        }
+                      </p>
                     </div>
 
                     <div className="flex-1 mt-6 border-t border-slate-800/80 pt-4 flex flex-col justify-between overflow-hidden min-h-[140px]">
